@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+
+import argparse
+import re
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+
+
+class _ProblemRef:
+    def __init__(self, *, group: str, contest_id: str, index: str, canonical_url: str) -> None:
+        self.group = group
+        self.contest_id = contest_id
+        self.index = index
+        self.canonical_url = canonical_url
+
+
+def _normalize_url(raw: str) -> str:
+    url = raw.strip()
+    if not url:
+        raise ValueError("empty url")
+    if "://" not in url:
+        url = f"https://{url}"
+    return url
+
+
+def _parse_problem_ref(url: str) -> _ProblemRef:
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+
+    patterns = [
+        (r"^/gym/(?P<contest_id>\d+)/problem/(?P<index>[^/]+)$", "gym"),
+        (r"^/contest/(?P<contest_id>\d+)/problem/(?P<index>[^/]+)$", "contest"),
+        (r"^/problemset/problem/(?P<contest_id>\d+)/(?P<index>[^/]+)$", "contest"),
+    ]
+
+    for pattern, group in patterns:
+        match = re.match(pattern, path)
+        if not match:
+            continue
+        contest_id = match.group("contest_id")
+        index = match.group("index").upper()
+        if not re.fullmatch(r"[A-Z0-9]+", index):
+            raise ValueError(f"unsupported problem index: {index!r}")
+        canonical_url = f"https://codeforces.com/{group}/{contest_id}/problem/{index}"
+        return _ProblemRef(group=group, contest_id=contest_id, index=index, canonical_url=canonical_url)
+
+    raise ValueError(f"unsupported Codeforces problem url path: {path!r}")
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="cf",
+        description="Generate a new Codeforces problem folder scaffold (defaults: python).",
+    )
+    parser.add_argument(
+        "--lang",
+        "-l",
+        default="python",
+        choices=["python", "go", "java"],
+        help="solution language folder to create (default: python)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite the solution file if it already exists",
+    )
+    parser.add_argument(
+        "url",
+        help="Codeforces problem url, e.g. https://codeforces.com/gym/105292/problem/A",
+    )
+
+    args = parser.parse_args(argv)
+
+    try:
+        normalized_url = _normalize_url(args.url)
+        ref = _parse_problem_ref(normalized_url)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+
+    repo_root = Path(__file__).resolve().parent
+    problem_dir = repo_root / "problems" / "codeforces" / ref.contest_id / ref.index
+    if problem_dir.exists() and not problem_dir.is_dir():
+        print(f"Error: {problem_dir} exists and is not a directory.", file=sys.stderr)
+        return 1
+
+    lang_dir = problem_dir / args.lang
+    lang_dir.mkdir(parents=True, exist_ok=True)
+
+    ext_by_lang = {"python": "py", "go": "go", "java": "java"}
+    ext = ext_by_lang[args.lang]
+    solution_path = lang_dir / f"solution.{ext}"
+
+    stub_by_lang = {
+        "python": (
+            f'"""\n{ref.canonical_url}\n"""\n\n'
+            "import sys\n\n\n"
+            "def solve() -> None:\n"
+            "    input = sys.stdin.readline\n"
+            "    # TODO: implement\n"
+            "    _ = input\n\n\n"
+            "if __name__ == \"__main__\":\n"
+            "    solve()\n"
+        ),
+        "go": (
+            f"// {ref.canonical_url}\n\n"
+            "package main\n\n"
+            "func main() {\n"
+            "    // TODO: implement\n"
+            "}\n"
+        ),
+        "java": (
+            f"// {ref.canonical_url}\n\n"
+            "class Main {\n"
+            "    public static void main(String[] args) throws Exception {\n"
+            "        // TODO: implement\n"
+            "    }\n"
+            "}\n"
+        ),
+    }
+
+    if solution_path.exists() and not args.force:
+        print(f"Problem folder: {problem_dir}")
+        print(f"exists:  {solution_path}")
+        return 0
+
+    solution_path.write_text(stub_by_lang[args.lang], encoding="utf-8")
+
+    print(f"Problem folder: {problem_dir}")
+    print(f"created: {solution_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
