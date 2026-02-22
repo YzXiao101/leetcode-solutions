@@ -2,7 +2,7 @@
 
 Personal LeetCode practice notes + solutions.
 
-残酷群打卡记录
+打卡记录
 
 ## Scripts
 
